@@ -1,12 +1,7 @@
 package io.treeverse.clients
 
 import com.google.protobuf.timestamp.Timestamp
-import io.treeverse.clients.LakeFSContext.{
-  LAKEFS_CONF_API_ACCESS_KEY_KEY,
-  LAKEFS_CONF_API_SECRET_KEY_KEY,
-  LAKEFS_CONF_API_URL_KEY
-}
-
+import io.treeverse.clients.LakeFSContext.{LAKEFS_CONF_API_ACCESS_KEY_KEY, LAKEFS_CONF_API_SECRET_KEY_KEY, LAKEFS_CONF_API_URL_KEY}
 import org.apache.hadoop.fs._
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.broadcast.Broadcast
@@ -14,9 +9,9 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.{SparkSession, _}
-
 import com.amazonaws.services.s3.AmazonS3
 import com.amazonaws.services.s3.model
+import io.treeverse.clients.GarbageCollector.StorageTypeS3
 
 import java.net.URI
 import collection.JavaConverters._
@@ -45,7 +40,55 @@ trait S3ClientBuilder extends Serializable {
   def build(hc: Configuration, bucket: String, region: String, numRetries: Int): AmazonS3
 }
 
+object BulkRemoverFactory {
+  def createS3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) : S3BulkRemover = {
+    new S3BulkRemover(hc, storageNamespace, region, numRetries)
+  }
+
+  def createAzureBlobBulkRemover(hc: Configuration, storageNamespace: String, numRetries: Int) : AzureBlobBulkRemover = {
+    new AzureBlobBulkRemover(hc, storageNamespace, numRetries)
+  }
+}
+
+trait BulkRemover {
+    def deleteObjects(keys: String, snPrefix: String) : Seq[String]
+}
+
+private class S3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) extends BulkRemover {
+  val uri = new URI(storageNamespace)
+  val bucket = uri.getHost
+  val s3Client = getS3Client(hc, bucket, region, numRetries)
+
+  override def deleteObjects(keys: String, snPrefix: String): Seq[String] = {
+    if (keys.isEmpty) return Seq.empty
+    val removeKeyNames = keys.map(x => snPrefix.concat(x))
+
+    println("Remove keys:", removeKeyNames.take(100).mkString(", "))
+
+    val removeKeys = removeKeyNames.map(k => new model.DeleteObjectsRequest.KeyVersion(k)).asJava
+
+    val delObjReq = new model.DeleteObjectsRequest(bucket).withKeys(removeKeys)
+    val res = s3Client.deleteObjects(delObjReq)
+    res.getDeletedObjects.asScala.map(_.getKey())
+  }
+
+  private def getS3Client(
+                           hc: Configuration,
+                           bucket: String,
+                           region: String,
+                           numRetries: Int
+                         ): AmazonS3 =
+    io.treeverse.clients.conditional.S3ClientBuilder.build(hc, bucket, region, numRetries)
+}
+
+private class AzureBlobBulkRemover(hc: Configuration, storageNamespace: String, numRetries: Int) extends BulkRemover {
+
+}
+
 object GarbageCollector {
+  val StorageTypeS3 = "s3"
+  val StorageTypeAzure = "azure"
+
   type ConfMap = List[(String, String)]
 
   case class APIConfigurations(apiURL: String, accessKey: String, secretKey: String)
@@ -397,32 +440,6 @@ object GarbageCollector {
     df.repartitionByRange(nPartitions, col(column))
   }
 
-  private def delObjIteration(
-      bucket: String,
-      keys: Seq[String],
-      s3Client: AmazonS3,
-      snPrefix: String
-  ): Seq[String] = {
-    if (keys.isEmpty) return Seq.empty
-    val removeKeyNames = keys.map(x => snPrefix.concat(x))
-
-    println("Remove keys:", removeKeyNames.take(100).mkString(", "))
-
-    val removeKeys = removeKeyNames.map(k => new model.DeleteObjectsRequest.KeyVersion(k)).asJava
-
-    val delObjReq = new model.DeleteObjectsRequest(bucket).withKeys(removeKeys)
-    val res = s3Client.deleteObjects(delObjReq)
-    res.getDeletedObjects.asScala.map(_.getKey())
-  }
-
-  private def getS3Client(
-      hc: Configuration,
-      bucket: String,
-      region: String,
-      numRetries: Int
-  ): AmazonS3 =
-    io.treeverse.clients.conditional.S3ClientBuilder.build(hc, bucket, region, numRetries)
-
   def bulkRemove(
       readKeysDF: DataFrame,
       bulkSize: Int,
@@ -442,10 +459,15 @@ object GarbageCollector {
 
     bulkedKeyStrings
       .mapPartitions(iter => {
-        val s3Client = getS3Client(configurationFromValues(hcValues), bucket, region, numRetries)
+        var bulkRemover: BulkRemover = null
+          if (storageType == StorageTypeS3 ) {
+            bulkRemover = BulkRemoverFactory.createS3BulkRemover(configurationFromValues(hcValues), storageNamespace, region, numRetries)
+          } else if (storageType == StorageTypeAzure) {
+            bulkRemover = BulkRemoverFactory.createAzureBlobBulkRemover(configurationFromValues(hcValues), storageNamespace, numRetries)
+          }
         iter
           .grouped(bulkSize)
-          .flatMap(delObjIteration(bucket, _, s3Client, snPrefix))
+          .flatMap(bulkRemover.deleteObjects(_, snPrefix))
       })
 
 //    bulkedKeyStrings
