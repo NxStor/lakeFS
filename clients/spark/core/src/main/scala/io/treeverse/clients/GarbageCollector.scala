@@ -365,7 +365,7 @@ object GarbageCollector {
     }
 
     val removed =
-      remove(storageNamespace, gcAddressesLocation, expiredAddresses, runID, region, hcValues)
+      remove(storageNamespace, gcAddressesLocation, expiredAddresses, runID, region, hcValues, storageType)
 
     val commitsDF = getCommitsDF(runID, gcCommitsLocation, spark)
     val reportLogsDst = concatToGCLogsPrefix(storageNamespace, "summary")
@@ -426,11 +426,12 @@ object GarbageCollector {
   def bulkRemove(
       readKeysDF: DataFrame,
       bulkSize: Int,
-      bucket: String,
+      storageNamespace: String,
       region: String,
       numRetries: Int,
       snPrefix: String,
-      hcValues: Broadcast[ConfMap]
+      hcValues: Broadcast[ConfMap],
+      storageType: String
   ): Dataset[String] = {
     val spark = org.apache.spark.sql.SparkSession.active
     import spark.implicits._
@@ -438,6 +439,7 @@ object GarbageCollector {
     val bulkedKeyStrings = repartitionedKeys
       .select("address")
       .map(_.getString(0)) // get address as string (address is in index 0 of row)
+
     bulkedKeyStrings
       .mapPartitions(iter => {
         val s3Client = getS3Client(configurationFromValues(hcValues), bucket, region, numRetries)
@@ -445,6 +447,14 @@ object GarbageCollector {
           .grouped(bulkSize)
           .flatMap(delObjIteration(bucket, _, s3Client, snPrefix))
       })
+
+//    bulkedKeyStrings
+//      .mapPartitions(iter => {
+//        val s3Client = getS3Client(configurationFromValues(hcValues), bucket, region, numRetries)
+//        iter
+//          .grouped(bulkSize)
+//          .flatMap(delObjIteration(bucket, _, s3Client, snPrefix))
+//      })
   }
 
   def remove(
@@ -453,14 +463,14 @@ object GarbageCollector {
       expiredAddresses: Dataset[Row],
       runID: String,
       region: String,
-      hcValues: Broadcast[ConfMap]
+      hcValues: Broadcast[ConfMap],
+      storageType: String
   ) = {
     val MaxBulkSize = 1000
-    val awsRetries = 1000
+    val numRetries = 1000
 
     println("storageNamespace: " + storageNamespace)
     val uri = new URI(storageNamespace)
-    val bucket = uri.getHost
     val key = uri.getPath
     val addSuffixSlash = if (key.endsWith("/")) key else key.concat("/")
     val snPrefix =
@@ -471,7 +481,7 @@ object GarbageCollector {
       .where(col("run_id") === runID)
       .where(col("relative") === true)
 
-    bulkRemove(df, MaxBulkSize, bucket, region, awsRetries, snPrefix, hcValues).toDF("addresses")
+    bulkRemove(df, MaxBulkSize, storageNamespace, region, numRetries, snPrefix, hcValues, storageType).toDF("addresses")
   }
 
   private def writeParquetReport(
