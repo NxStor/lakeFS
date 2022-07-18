@@ -16,7 +16,6 @@ import com.azure.storage.blob.{BlobServiceClient, BlobServiceClientBuilder}
 import com.azure.storage.blob.batch.{BlobBatchClient, BlobBatchClientBuilder}
 import com.azure.storage.blob.models.DeleteSnapshotsOptionType
 import com.azure.storage.common.StorageSharedKeyCredential
-import io.treeverse.clients.GarbageCollector.StorageTypeS3
 
 import java.net.URI
 import collection.JavaConverters._
@@ -45,16 +44,6 @@ trait S3ClientBuilder extends Serializable {
   def build(hc: Configuration, bucket: String, region: String, numRetries: Int): AmazonS3
 }
 
-object BulkRemoverFactory {
-  def createS3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) : S3BulkRemover = {
-    new S3BulkRemover(hc, storageNamespace, region, numRetries)
-  }
-
-  def createAzureBlobBulkRemover(hc: Configuration, storageNamespace: String, numRetries: Int) : AzureBlobBulkRemover = {
-    new AzureBlobBulkRemover(hc, storageNamespace, numRetries)
-  }
-}
-
 trait BulkRemover {
   def constructRemoveKeyNames( keys: Seq[String], snPrefix: String): Seq[String] = {
     if (keys.isEmpty) return Seq.empty
@@ -64,69 +53,85 @@ trait BulkRemover {
   def deleteObjects(keys: Seq[String], snPrefix: String) : Seq[String]
 }
 
-private class S3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) extends BulkRemover {
-  val uri = new URI(storageNamespace)
-  val bucket = uri.getHost
-  val s3Client = getS3Client(hc, bucket, region, numRetries)
+object BulkRemoverFactory {
+  val StorageTypeS3 = "s3"
+  val StorageTypeAzure = "azure"
 
-  override def deleteObjects(keys: Seq[String], snPrefix: String): Seq[String] = {
-    val removeKeyNames = constructRemoveKeyNames(keys, snPrefix)
-    println("Remove keys:", removeKeyNames.take(100).mkString(", "))
+  private class S3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) extends BulkRemover {
+    val uri = new URI(storageNamespace)
+    val bucket = uri.getHost
+    val s3Client = getS3Client(hc, bucket, region, numRetries)
 
-    val removeKeys = removeKeyNames.map(k => new model.DeleteObjectsRequest.KeyVersion(k)).asJava
+    override def deleteObjects(keys: Seq[String], snPrefix: String): Seq[String] = {
+      val removeKeyNames = constructRemoveKeyNames(keys, snPrefix)
+      println("Remove keys:", removeKeyNames.take(100).mkString(", "))
 
-    val delObjReq = new model.DeleteObjectsRequest(bucket).withKeys(removeKeys)
-    val res = s3Client.deleteObjects(delObjReq)
-    res.getDeletedObjects.asScala.map(_.getKey())
+      val removeKeys = removeKeyNames.map(k => new model.DeleteObjectsRequest.KeyVersion(k)).asJava
+
+      val delObjReq = new model.DeleteObjectsRequest(bucket).withKeys(removeKeys)
+      val res = s3Client.deleteObjects(delObjReq)
+      res.getDeletedObjects.asScala.map(_.getKey())
+    }
+
+    private def getS3Client(
+                             hc: Configuration,
+                             bucket: String,
+                             region: String,
+                             numRetries: Int
+                           ): AmazonS3 =
+      io.treeverse.clients.conditional.S3ClientBuilder.build(hc, bucket, region, numRetries)
   }
 
-  private def getS3Client(
-                           hc: Configuration,
-                           bucket: String,
-                           region: String,
-                           numRetries: Int
-                         ): AmazonS3 =
-    io.treeverse.clients.conditional.S3ClientBuilder.build(hc, bucket, region, numRetries)
-}
+  //TODO: can I use numRetries in Azure batch client at all?
+  private class AzureBlobBulkRemover(hc: Configuration, storageNamespace: String, numRetries: Int) extends BulkRemover {
+    val StorageAccountKeyPropertyPattern = "fs.azure.account.key.<storageAccountName>.dfs.core.windows.net"
+    val uri = new URI(storageNamespace)
+    // example storage namespace https://<storageAccountName>.blob.core.windows.net/talscontainer/repo6/
+    val storageAccountUrl = uri.getHost // storage account url = https://<storageAccountName>.blob.core.windows.net
+    val storageAccountName = storageAccountUrl.split('.')(0)
 
-//TODO: can I use numRetries in Azure batch client at all?
-private class AzureBlobBulkRemover(hc: Configuration, storageNamespace: String, numRetries: Int) extends BulkRemover {
-  val StorageAccountKeyPropertyPattern = "fs.azure.account.key.<storageAccountName>.dfs.core.windows.net"
-  val uri = new URI(storageNamespace)
-  // example storage namespace https://<storageAccountName>.blob.core.windows.net/talscontainer/repo6/
-  val storageAccountUrl = uri.getHost // storage account url = https://<storageAccountName>.blob.core.windows.net
-  val storageAccountName = storageAccountUrl.split('.')(0)
+    val blobBatchClient = getBlobBatchClient(hc, storageAccountUrl, storageAccountName)
 
-  val blobBatchClient = getBlobBatchClient(hc, storageAccountUrl, storageAccountName)
+    override def deleteObjects(keys: Seq[String], snPrefix: String): Seq[String] = {
+      val removeKeyNames = constructRemoveKeyNames(keys, snPrefix)
+      println("Remove keys:", removeKeyNames.take(100).mkString(", "))
 
-  override def deleteObjects(keys: Seq[String], snPrefix: String): Seq[String] = {
-    val removeKeyNames = constructRemoveKeyNames(keys, snPrefix)
-    println("Remove keys:", removeKeyNames.take(100).mkString(", "))
+      val removeKeys = removeKeyNames.asJava
 
-    val removeKeys = removeKeyNames.asJava
+      blobBatchClient.deleteBlobs(removeKeys, DeleteSnapshotsOptionType.INCLUDE)
+        .forEach((response: Response[Void]) => System.out.println("Deleting blob with URL %s completed with status code %d%n",
+          response.getRequest.getUrl, response.getStatusCode))
 
-    blobBatchClient.deleteBlobs(removeKeys, DeleteSnapshotsOptionType.INCLUDE)
-      .forEach((response: Response[Void]) => System.out.printf("Deleting blob with URL %s completed with status code %d%n",
-        response.getRequest.getUrl, response.getStatusCode))
+      // TODO: change this
+      Seq.empty
+    }
 
-    removeKeys
+    private def getBlobBatchClient(hc: Configuration, storageAccountUrl: String, storageAccountName: String): BlobBatchClient = {
+      // Storage account keys are values of the spark propery with name spark.hadoop.fs.azure.account.key.storageAccountName.dfs.core.windows.net
+      val storageAccountKeyPropName = StorageAccountKeyPropertyPattern.replaceFirst("<storageAccountName>", storageAccountName)
+      val storageAccountKey = hc.get(storageAccountKeyPropName)
+      val blobServiceClientSharedKey: BlobServiceClient =
+        new BlobServiceClientBuilder().endpoint(storageAccountUrl)
+          .credential(new StorageSharedKeyCredential(storageAccountName, storageAccountKey)).buildClient
+
+      new BlobBatchClientBuilder(blobServiceClientSharedKey).buildClient
+    }
+
   }
 
-  private def getBlobBatchClient(hc: Configuration, storageAccountUrl: String, storageAccountName: String): BlobBatchClient = {
-    //Storage account keys are values of the spark propery with name spark.hadoop.fs.azure.account.key.storageAccountName.dfs.core.windows.net
-    val storageAccountKeyPropName = StorageAccountKeyPropertyPattern.replaceFirst("<storageAccountName>", storageAccountName)
-    val storageAccountKey = hc.get(storageAccountKeyPropName)
-    val blobServiceClientSharedKey: BlobServiceClient =
-      new BlobServiceClientBuilder().endpoint(storageAccountUrl)
-        .credential(new StorageSharedKeyCredential(storageAccountName, storageAccountKey)).buildClient
-
-    new BlobBatchClientBuilder(blobServiceClientSharedKey).buildClient
+  def apply(storageType: String, hc: Configuration, storageNamespace: String, numRetries: Int, region: String): BulkRemover =
+  {
+    if (storageType == StorageTypeS3) {
+      return new S3BulkRemover(hc, storageNamespace, region, numRetries)
+    } else if (storageType == StorageTypeAzure) {
+      return new AzureBlobBulkRemover(hc, storageNamespace, numRetries)
+    } else {
+      throw new IllegalArgumentException("Invalid argument.")
+    }
   }
 }
 
 object GarbageCollector {
-  val StorageTypeS3 = "s3"
-  val StorageTypeAzure = "azure"
 
   type ConfMap = List[(String, String)]
 
@@ -498,24 +503,11 @@ object GarbageCollector {
 
     bulkedKeyStrings
       .mapPartitions(iter => {
-        var bulkRemover: BulkRemover = null
-          if (storageType == StorageTypeS3 ) {
-            bulkRemover = BulkRemoverFactory.createS3BulkRemover(configurationFromValues(hcValues), storageNamespace, region, numRetries)
-          } else if (storageType == StorageTypeAzure) {
-            bulkRemover = BulkRemoverFactory.createAzureBlobBulkRemover(configurationFromValues(hcValues), storageNamespace, numRetries)
-          }
+        val bulkRemover = BulkRemoverFactory(storageType, configurationFromValues(hcValues), storageNamespace, numRetries, region)
         iter
           .grouped(bulkSize)
           .flatMap(bulkRemover.deleteObjects(_, snPrefix))
       })
-
-//    bulkedKeyStrings
-//      .mapPartitions(iter => {
-//        val s3Client = getS3Client(configurationFromValues(hcValues), bucket, region, numRetries)
-//        iter
-//          .grouped(bulkSize)
-//          .flatMap(delObjIteration(bucket, _, s3Client, snPrefix))
-//      })
   }
 
   def remove(
