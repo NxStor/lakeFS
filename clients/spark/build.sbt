@@ -61,7 +61,6 @@ def generateCoreProject(buildType: BuildType) =
         // override what it selects.
         "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.194" % "provided",
         "com.azure" % "azure-core" % "1.10.0",
-        "org.apache.hadoop" % "hadoop-azure" % "3.2.1",
         "com.azure" % "azure-storage-blob" % "12.9.0",
         "com.azure" % "azure-storage-blob-batch" % "12.7.0",
         // Snappy is JNI :-(.  However it does claim to work with
