@@ -60,9 +60,9 @@ def generateCoreProject(buildType: BuildType) =
         // version, but ask to use whatever is provided so we do not
         // override what it selects.
 //        "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.194" % "provided",
-        "com.azure" % "azure-core" % "1.30.0",
-        "com.azure" % "azure-storage-blob" % "12.18.0",
-        "com.azure" % "azure-storage-blob-batch" % "12.14.0",
+        "com.azure" % "azure-core" % "1.30.0" % "provided",
+        "com.azure" % "azure-storage-blob" % "12.18.0" % "provided",
+        "com.azure" % "azure-storage-blob-batch" % "12.14.0" % "provided",
         // Snappy is JNI :-(.  However it does claim to work with
         // ClassLoaders, and (even more importantly!) using a preloaded JNI
         // version will probably continue to work because the C language API
