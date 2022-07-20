@@ -9,7 +9,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.{SparkSession, _}
-import com.amazonaws.services.s3.AmazonS3
+//import com.amazonaws.services.s3.AmazonS3
 
 import java.net.URI
 import collection.JavaConverters._
@@ -35,7 +35,8 @@ trait S3ClientBuilder extends Serializable {
    *  @param region     to find this bucket.
    *  @param numRetries number of times to retry on AWS.
    */
-  def build(hc: Configuration, bucket: String, region: String, numRetries: Int): AmazonS3
+//  def build(hc: Configuration, bucket: String, region: String, numRetries: Int): AmazonS3
+  def build(hc: Configuration, bucket: String, region: String, numRetries: Int): Unit
 }
 
 object GarbageCollector {

@@ -47,7 +47,7 @@ def generateCoreProject(buildType: BuildType) =
         "commons-codec" % "commons-codec" % "1.15",
         "org.apache.spark" %% "spark-sql" % buildType.sparkVersion % "provided",
         "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
-        "org.apache.hadoop" % "hadoop-aws" % buildType.hadoopVersion,
+//        "org.apache.hadoop" % "hadoop-aws" % buildType.hadoopVersion,
         "org.apache.hadoop" % "hadoop-common" % buildType.hadoopVersion,
         "org.apache.hadoop" % "hadoop-azure" % buildType.hadoopVersion % "provided",
         "com.google.cloud.bigdataoss" % "gcs-connector" % buildType.gcpConnectorVersion,
@@ -59,7 +59,7 @@ def generateCoreProject(buildType: BuildType) =
         // hadoop-aws provides AWS SDK at version >= 1.7.4.  So declare this
         // version, but ask to use whatever is provided so we do not
         // override what it selects.
-        "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.194" % "provided",
+//        "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.194" % "provided",
         "com.azure" % "azure-core" % "1.30.0",
         "com.azure" % "azure-storage-blob" % "12.18.0",
         "com.azure" % "azure-storage-blob-batch" % "12.14.0",

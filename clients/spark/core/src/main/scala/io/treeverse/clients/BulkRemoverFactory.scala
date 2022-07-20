@@ -1,6 +1,6 @@
 package io.treeverse.clients
 
-import com.amazonaws.services.s3.{AmazonS3, model}
+//import com.amazonaws.services.s3.{AmazonS3, model}
 //import com.azure.core.http.rest.Response
 //import com.azure.storage.blob.batch.{BlobBatchClient, BlobBatchClientBuilder}
 //import com.azure.storage.blob.models.DeleteSnapshotsOptionType
@@ -8,8 +8,8 @@ import com.amazonaws.services.s3.{AmazonS3, model}
 //import com.azure.storage.common.StorageSharedKeyCredential
 import org.apache.hadoop.conf.Configuration
 
-import java.net.URI
-import collection.JavaConverters._
+//import java.net.URI
+//import collection.JavaConverters._
 
 trait BulkRemover {
   def constructRemoveKeyNames( keys: Seq[String], snPrefix: String): Seq[String] = {
@@ -24,30 +24,30 @@ object BulkRemoverFactory {
   val StorageTypeS3 = "s3"
   val StorageTypeAzure = "azure"
 
-  private class S3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) extends BulkRemover {
-    val uri = new URI(storageNamespace)
-    val bucket = uri.getHost
-    val s3Client = getS3Client(hc, bucket, region, numRetries)
-
-    override def deleteObjects(keys: Seq[String], snPrefix: String): Seq[String] = {
-      val removeKeyNames = constructRemoveKeyNames(keys, snPrefix)
-      println("Remove keys:", removeKeyNames.take(100).mkString(", "))
-
-      val removeKeys = removeKeyNames.map(k => new model.DeleteObjectsRequest.KeyVersion(k)).asJava
-
-      val delObjReq = new model.DeleteObjectsRequest(bucket).withKeys(removeKeys)
-      val res = s3Client.deleteObjects(delObjReq)
-      res.getDeletedObjects.asScala.map(_.getKey())
-    }
-
-    private def getS3Client(
-                             hc: Configuration,
-                             bucket: String,
-                             region: String,
-                             numRetries: Int
-                           ): AmazonS3 =
-      io.treeverse.clients.conditional.S3ClientBuilder.build(hc, bucket, region, numRetries)
-  }
+//  private class S3BulkRemover(hc: Configuration, storageNamespace: String, region: String, numRetries: Int) extends BulkRemover {
+//    val uri = new URI(storageNamespace)
+//    val bucket = uri.getHost
+//    val s3Client = getS3Client(hc, bucket, region, numRetries)
+//
+//    override def deleteObjects(keys: Seq[String], snPrefix: String): Seq[String] = {
+//      val removeKeyNames = constructRemoveKeyNames(keys, snPrefix)
+//      println("Remove keys:", removeKeyNames.take(100).mkString(", "))
+//
+//      val removeKeys = removeKeyNames.map(k => new model.DeleteObjectsRequest.KeyVersion(k)).asJava
+//
+//      val delObjReq = new model.DeleteObjectsRequest(bucket).withKeys(removeKeys)
+//      val res = s3Client.deleteObjects(delObjReq)
+//      res.getDeletedObjects.asScala.map(_.getKey())
+//    }
+//
+//    private def getS3Client(
+//                             hc: Configuration,
+//                             bucket: String,
+//                             region: String,
+//                             numRetries: Int
+//                           ): AmazonS3 =
+//      io.treeverse.clients.conditional.S3ClientBuilder.build(hc, bucket, region, numRetries)
+//  }
 
   //TODO: can I use numRetries in Azure batch client at all?
 //  private class AzureBlobBulkRemover(hc: Configuration, storageNamespace: String, numRetries: Int) extends BulkRemover {
@@ -87,12 +87,13 @@ object BulkRemoverFactory {
 //  }
 
   def apply(storageType: String, hc: Configuration, storageNamespace: String, numRetries: Int, region: String): BulkRemover = {
-    if (storageType == StorageTypeS3) {
-      new S3BulkRemover(hc, storageNamespace, region, numRetries)
+//    if (storageType == StorageTypeS3) {
+//      new S3BulkRemover(hc, storageNamespace, region, numRetries)
 //    } else if (storageType == StorageTypeAzure) {
 //      new AzureBlobBulkRemover(hc, storageNamespace, numRetries)
-    } else {
-      throw new IllegalArgumentException("Invalid argument.")
-    }
+//    } else {
+//      throw new IllegalArgumentException("Invalid argument.")
+//    }
+    throw new IllegalArgumentException("Invalid argument.")
   }
 }
